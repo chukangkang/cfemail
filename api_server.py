@@ -65,7 +65,7 @@ class CreateRuleRequest(BaseModel):
     domain: str = Field(..., description="Cloudflare 上托管的域名,如 example.com")
     custom_address: EmailStr = Field(..., description="自定义地址,如 hello@example.com")
     destination: EmailStr = Field(..., description="目标邮箱,必须已在 Cloudflare 验证通过")
-    name: str | None = None
+    name: Optional[str] = None
     enabled: bool = True
     priority: int = 0
 
