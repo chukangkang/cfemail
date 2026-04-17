@@ -1,8 +1,10 @@
 /**
  * Windsurf 账号自动注册脚本（修复版）
  *
- * 依赖：
- *   npm i puppeteer-real-browser imapflow mailparser delay
+ * 依赖windows/powershel：
+ *   winget install OpenJS.NodeJS.LTS
+ *   npm install
+ *   node register_windsurf.js 
  *
  * 运行：
  *   node register_windsurf.js
@@ -20,24 +22,67 @@ const { connect } = require('puppeteer-real-browser');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const delay = require('delay');
+const crypto = require('crypto');
+
+// ====================== 随机生成器 ======================
+function randStr(len, chars) {
+  let s = '';
+  const bytes = crypto.randomBytes(len);
+  for (let i = 0; i < len; i++) s += chars[bytes[i] % chars.length];
+  return s;
+}
+const LOWER = 'abcdefghijklmnopqrstuvwxyz';
+const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const DIGIT = '0123456789';
+
+// firstName: 8 位纯字母（Windsurf 校验 "valid name" 不允许数字）
+function genFirstName() {
+  return randStr(8, LOWER);
+}
+// lastName: 6 位纯字母
+function genLastName() {
+  return randStr(6, LOWER);
+}
+// password: 9 位，必须含大小写+数字
+function genPassword() {
+  // 先保证每类至少 1 个
+  const must = [
+    randStr(1, UPPER),
+    randStr(1, LOWER),
+    randStr(1, DIGIT),
+  ];
+  const rest = randStr(6, UPPER + LOWER + DIGIT).split('');
+  const all = [...must, ...rest];
+  // Fisher-Yates 洗牌
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(0, i + 1);
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return all.join('');
+}
+
+const _firstName = genFirstName();
+const _lastName = genLastName();
+const _password = genPassword();
 
 // ====================== 配置 ======================
 const CONFIG = {
-  firstName: 'windf2',
-  lastName: 'one',
-  email: 'windf4@chukk.ai',
-  password: 'WindfPass123',
-  confirmPassword: 'WindfPass123',
+  firstName: _firstName,
+  lastName: _lastName,
+  email: `${_firstName}@proxyai.vip`,
+  password: _password,
+  confirmPassword: _password,
 
-  // 收验证码的 IMAP。注意：如果 chukk.ai 是通过 Cloudflare Email Routing
+  // 收验证码的 IMAP。注意：如果  是通过 Cloudflare Email Routing
   // 转发到 Gmail 等第三方邮箱，这里要填那个第三方邮箱的 IMAP，而不是 chukk.ai。
+  // 注意：必须是 IMAP（不是 POP3）。阿里企业邮 IMAP: imap.mxhichina.com:993
   imap: {
-    host: 'imap.chukk.ai',
+    host: 'imap.mxhichina.com',
     port: 993,
     secure: true,
     auth: {
-      user: 'windf4@chukk.ai',
-      pass: '你的邮箱密码或授权码',
+      user: 'aaa@aaa.com',
+      pass: 'xxxxx',
     },
     logger: false,
   },
@@ -171,6 +216,11 @@ async function fillOtp(page, code) {
 }
 
 async function register() {
+  console.log('🎲 随机生成的账号信息：');
+  console.log('  firstName:', CONFIG.firstName);
+  console.log('  lastName :', CONFIG.lastName);
+  console.log('  email    :', CONFIG.email);
+  console.log('  password :', CONFIG.password);
   console.log('🚀 启动防风控浏览器...');
   const { page, browser } = await connect({
     headless: false,
