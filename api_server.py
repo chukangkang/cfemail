@@ -76,6 +76,8 @@ class DestinationRequest(BaseModel):
 
 # ---------- App ----------
 app = FastAPI(title="Cloudflare Email Routing API", version="1.0.0")
+# 有些老版本 Swagger UI 不支持 OpenAPI 3.1,降级为 3.0.2 以确保 /docs 正常渲染
+app.openapi_version = "3.0.2"
 
 
 @app.get("/health")
