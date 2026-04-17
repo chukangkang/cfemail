@@ -22,6 +22,7 @@ class Config:
         self.api_host: str = api.get("host", "0.0.0.0")
         self.api_port: int = int(api.get("port", 8000))
         self.api_access_key: str = (api.get("access_key") or "").strip()
+        self.api_del_key: str = (api.get("del_key") or "").strip()
 
         # 鉴权:api_token 或 (email + api_key) 二选一
         has_token = bool(self.cf_api_token)
@@ -37,6 +38,7 @@ class Config:
             for k, v in {
                 "cloudflare.account_id": self.cf_account_id,
                 "api.access_key": self.api_access_key,
+                "api.del_key": self.api_del_key,
             }.items()
             if not v
         ]

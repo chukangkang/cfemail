@@ -16,3 +16,5 @@ api:
   host: "0.0.0.0"
   port: 8000
   access_key: "change_me_to_a_long_random_string"
+  # 删除规则专用密钥(DELETE /api/routing/rules/{id} 使用)
+  del_key: "change_me_to_another_long_random_string"

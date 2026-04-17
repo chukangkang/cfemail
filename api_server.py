@@ -52,6 +52,14 @@ def verify_api_key(x_api_key: str = Header(default="")) -> None:
         )
 
 
+def verify_del_key(x_del_key: str = Header(default="")) -> None:
+    """删除接口专用密钥,使用请求头 X-Del-Key。"""
+    if x_del_key != get_config().api_del_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 X-Del-Key"
+        )
+
+
 # ---------- 数据模型 ----------
 class CreateRuleRequest(BaseModel):
     domain: str = Field(..., description="Cloudflare 上托管的域名,如 example.com")
@@ -114,8 +122,8 @@ def list_rules(domain: str) -> dict[str, Any]:
 
 @app.delete(
     "/api/routing/rules/{rule_id}",
-    dependencies=[Depends(verify_api_key)],
-    summary="删除指定规则",
+    dependencies=[Depends(verify_del_key)],
+    summary="删除指定规则(需在请求头携带 X-Del-Key)",
 )
 def delete_rule(rule_id: str, domain: str) -> dict[str, Any]:
     cf = get_cf()
