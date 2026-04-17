@@ -167,4 +167,4 @@ def add_destination(body: DestinationRequest) -> dict[str, Any]:
 
 if __name__ == "__main__":
     cfg = get_config()
-    uvicorn.run(app, host=cfg.api_host, port=cfg.api_port)
+    uvicorn.run(app, host=cfg.api_host, port=cfg.api_port, root_path="/email")
