@@ -75,36 +75,9 @@ class DestinationRequest(BaseModel):
 
 
 # ---------- App ----------
-# 关闭默认 /docs,改用下方自定义路由加载新版 Swagger UI(支持 OpenAPI 3.1)
-app = FastAPI(
-    title="Cloudflare Email Routing API",
-    version="1.0.0",
-    docs_url=None,
-    redoc_url=None,
-)
-
-
-@app.get("/docs", include_in_schema=False)
-def custom_swagger_ui() -> Any:
-    from fastapi.openapi.docs import get_swagger_ui_html
-
-    return get_swagger_ui_html(
-        openapi_url=app.openapi_url or "/openapi.json",
-        title=f"{app.title} - Swagger UI",
-        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
-        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
-    )
-
-
-@app.get("/redoc", include_in_schema=False)
-def custom_redoc() -> Any:
-    from fastapi.openapi.docs import get_redoc_html
-
-    return get_redoc_html(
-        openapi_url=app.openapi_url or "/openapi.json",
-        title=f"{app.title} - ReDoc",
-        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
-    )
+app = FastAPI(title="Cloudflare Email Routing API", version="1.0.0")
+# 有些老版本 Swagger UI 不支持 OpenAPI 3.1,降级为 3.0.2 以确保 /docs 正常渲染
+app.openapi_version = "3.0.2"
 
 
 @app.get("/health")
