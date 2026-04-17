@@ -104,6 +104,27 @@ async function fetchVerificationCode() {
 }
 
 /**
+ * 在一组候选选择器里取第一个能匹配到的；都不到则抛错。
+ */
+async function waitAnySelector(page, selectors, timeout = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    for (const sel of selectors) {
+      const el = await page.$(sel);
+      if (el) return { selector: sel, handle: el };
+    }
+    await delay(300);
+  }
+  throw new Error(`等待选择器超时: ${selectors.join(' | ')}`);
+}
+
+async function typeInto(page, selectors, value) {
+  const { selector } = await waitAnySelector(page, selectors, 20000);
+  await page.click(selector, { clickCount: 3 }).catch(() => {});
+  await page.type(selector, value, { delay: 60 });
+}
+
+/**
  * 按文本点击按钮。Puppeteer 20+ 支持 ::-p-text() 伪类。
  * 为稳妥起见，做一次 DOM 兜底查询。
  */
@@ -163,13 +184,38 @@ async function register() {
     await page.goto('https://windsurf.com/account/register', {
       waitUntil: 'domcontentloaded',
     });
-    await page.waitForSelector('input[name="firstName"]', { timeout: 30000 });
 
     // 2. 第一步：填写基本信息
     console.log('✍️ 第一步：填写基本信息');
-    await page.type('input[name="firstName"]', CONFIG.firstName, { delay: 60 });
-    await page.type('input[name="lastName"]', CONFIG.lastName, { delay: 60 });
-    await page.type('input[name="email"]', CONFIG.email, { delay: 60 });
+    await typeInto(
+      page,
+      [
+        'input[name="firstName"]',
+        'input[name="first_name"]',
+        'input[placeholder="Your first name" i]',
+        'input[autocomplete="given-name"]',
+      ],
+      CONFIG.firstName
+    );
+    await typeInto(
+      page,
+      [
+        'input[name="lastName"]',
+        'input[name="last_name"]',
+        'input[placeholder="Your last name" i]',
+        'input[autocomplete="family-name"]',
+      ],
+      CONFIG.lastName
+    );
+    await typeInto(
+      page,
+      [
+        'input[name="email"]',
+        'input[type="email"]',
+        'input[autocomplete="email"]',
+      ],
+      CONFIG.email
+    );
 
     // 勾选服务条款（若未勾选）
     const checkbox = await page.$('input[type="checkbox"]');
@@ -187,13 +233,26 @@ async function register() {
     await clickButtonByText(page, 'Continue');
 
     // 3. 第二步：密码
-    await page.waitForSelector('input[name="password"]', { timeout: 20000 });
     console.log('🔐 填写密码');
-    await page.type('input[name="password"]', CONFIG.password, { delay: 60 });
-    await page.type(
-      'input[name="passwordConfirmation"]',
-      CONFIG.confirmPassword,
-      { delay: 60 }
+    await typeInto(
+      page,
+      [
+        'input[name="password"]',
+        'input[type="password"][autocomplete="new-password"]',
+        'input[type="password"]:nth-of-type(1)',
+      ],
+      CONFIG.password
+    );
+    await typeInto(
+      page,
+      [
+        'input[name="passwordConfirmation"]',
+        'input[name="password_confirmation"]',
+        'input[name="confirmPassword"]',
+        'input[name="confirm_password"]',
+        'input[type="password"]:nth-of-type(2)',
+      ],
+      CONFIG.confirmPassword
     );
     await delay(500);
 
