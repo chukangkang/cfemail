@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, status
