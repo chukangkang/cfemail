@@ -1,0 +1,10 @@
+# 复制为 config.yaml 后填写真实信息
+cloudflare:
+  api_token: "your_cloudflare_api_token"
+  account_id: "your_cloudflare_account_id"
+
+# 保护本 API 的访问密钥,调用接口时需在请求头 X-API-Key 中携带
+api:
+  host: "0.0.0.0"
+  port: 8000
+  access_key: "change_me_to_a_long_random_string"
