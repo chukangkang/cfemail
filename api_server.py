@@ -37,7 +37,12 @@ def get_config() -> Config:
 
 @lru_cache
 def get_cf() -> CloudflareEmailRouting:
-    return CloudflareEmailRouting(get_config().cf_api_token)
+    cfg = get_config()
+    return CloudflareEmailRouting(
+        api_token=cfg.cf_api_token or None,
+        email=cfg.cf_email or None,
+        api_key=cfg.cf_api_key or None,
+    )
 
 
 def verify_api_key(x_api_key: str = Header(default="")) -> None:

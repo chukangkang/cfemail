@@ -27,14 +27,27 @@ CF_API = "https://api.cloudflare.com/client/v4"
 
 
 class CloudflareEmailRouting:
-    def __init__(self, api_token: str):
+    def __init__(
+        self,
+        api_token: str | None = None,
+        email: str | None = None,
+        api_key: str | None = None,
+    ):
+        """
+        鉴权二选一:
+        - 传入 api_token,使用 Bearer Token 方式(推荐)
+        - 传入 email + api_key(Global API Key),使用 X-Auth-Email / X-Auth-Key
+        """
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {api_token}",
-                "Content-Type": "application/json",
-            }
-        )
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_token:
+            headers["Authorization"] = f"Bearer {api_token}"
+        elif email and api_key:
+            headers["X-Auth-Email"] = email
+            headers["X-Auth-Key"] = api_key
+        else:
+            raise ValueError("必须提供 api_token,或同时提供 email 与 api_key")
+        self.session.headers.update(headers)
 
     # ---------- 基础请求 ----------
     def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:

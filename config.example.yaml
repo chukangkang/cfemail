@@ -1,7 +1,15 @@
 # 复制为 config.yaml 后填写真实信息
 cloudflare:
-  api_token: "your_cloudflare_api_token"
+  # 账户 ID(必填,用于管理目标邮箱)
   account_id: "your_cloudflare_account_id"
+
+  # ====== 鉴权二选一 ======
+  # 方式 A(推荐):API Token
+  api_token: ""
+
+  # 方式 B:Global API Key(CF_Email + CF_Key)
+  email: "your_cloudflare_login_email"
+  api_key: "your_global_api_key"
 
 # 保护本 API 的访问密钥,调用接口时需在请求头 X-API-Key 中携带
 api:
