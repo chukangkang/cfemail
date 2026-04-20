@@ -25,6 +25,16 @@ const delay = require('delay');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+
+// ====================== 邮箱转发 API 配置 ======================
+const EMAIL_API = {
+  baseUrl: 'https://new-api.ai/email',
+  apiKey: 'proxyai.vip',
+  domain: 'proxyai.vip',
+  destination: 'chukk@chukk.cn',
+};
+// ==================================================
 
 // ====================== 随机生成器 ======================
 function randStr(len, chars) {
@@ -83,7 +93,7 @@ const CONFIG = {
     port: 993,
     secure: true,
     auth: {
-      user: 'aaa@aaa.com',
+      user: 'chukk@chukk.cn',
       pass: 'xxxxx',
     },
     logger: false,
@@ -108,6 +118,56 @@ function saveAccountToFile(email, password) {
   
   fs.appendFileSync(filename, line);
   console.log(`📁 已保存账号到文件: ${filename}`);
+}
+// ==================================================
+
+// ====================== 创建邮箱转发规则 ======================
+function createEmailRoutingRule(customAddress) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({
+      domain: EMAIL_API.domain,
+      custom_address: customAddress,
+      destination: EMAIL_API.destination,
+      name: 'windurf',
+      enabled: true,
+      priority: 0,
+    });
+
+    const options = {
+      hostname: new URL(EMAIL_API.baseUrl).hostname,
+      port: 443,
+      path: '/email/api/routing/rules',
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'x-api-key': EMAIL_API.apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result.success) {
+            console.log(`📧 已创建邮箱转发: ${customAddress} -> ${EMAIL_API.destination}`);
+            resolve(result);
+          } else {
+            reject(new Error(`创建邮箱失败: ${JSON.stringify(result)}`));
+          }
+        } catch (e) {
+          reject(new Error(`解析响应失败: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => reject(e));
+    req.write(postData);
+    req.end();
+  });
 }
 // ==================================================
 
@@ -235,6 +295,17 @@ async function register() {
   console.log('  lastName :', CONFIG.lastName);
   console.log('  email    :', CONFIG.email);
   console.log('  password :', CONFIG.password);
+
+  // 先创建邮箱转发规则
+  console.log('📧 创建邮箱转发规则...');
+  try {
+    await createEmailRoutingRule(CONFIG.email);
+    console.log('✅ 邮箱转发创建成功');
+  } catch (e) {
+    console.error('❌ 创建邮箱转发失败:', e.message);
+    throw e;
+  }
+
   console.log('🚀 启动防风控浏览器...');
   const { page, browser } = await connect({
     headless: false,
@@ -338,6 +409,19 @@ async function register() {
         console.warn(`IMAP 读取失败(${i + 1}): ${e.message}`);
       }
       if (code) break;
+      
+      // 未收到验证码，尝试点击 Resend code
+      if (i > 0 && i % 6 === 0) { // 每隔约30秒尝试重发
+        console.log('📤 尝试重新发送验证码...');
+        try {
+          await clickButtonByText(page, 'Resend code');
+          console.log('✅ 已点击 Resend code');
+          await delay(2000);
+        } catch (e) {
+          console.warn(`点击 Resend code 失败: ${e.message}`);
+        }
+      }
+      
       console.log(`未收到，重试 ${i + 1}/24`);
       await delay(5000);
     }
@@ -355,14 +439,63 @@ async function register() {
     console.log('✅ 提交验证');
     await clickButtonByText(page, 'Create account');
 
-    // 等待跳转，判断成功（URL 变化或出现仪表盘特征）
+    // 等待跳转或成功提示
+    let registered = false;
     try {
+      // 方案1: URL 变化
       await page.waitForFunction(
         () => !/\/account\/register/.test(location.pathname),
-        { timeout: 60000 }
+        { timeout: 30000 }
       );
+      registered = true;
+    } catch (_) {}
+    
+    if (!registered) {
+      try {
+        // 方案2: 检查成功提示文本
+        await page.waitForSelector('text/Dashboard', { timeout: 10000 });
+        registered = true;
+      } catch (_) {}
+    }
+    
+    if (!registered) {
+      try {
+        // 方案3: 检查错误提示是否出现（如果有错误说明没成功）
+        const errorMsg = await page.$('text/Invalid code, please try again');
+        if (errorMsg) {
+          throw new Error('验证码错误');
+        }
+      } catch (_) {}
+    }
+
+    if (!registered) {
+      try {
+        // 方案4: 检测 cookie 同意按钮或保存密码按钮（注册成功后的常见弹窗）
+        await page.waitForSelector('button::-p-text(Accept), button::-p-text(Accept All), button::-p-text(Save password), button::-p-text(Save Password)', { timeout: 5000 });
+        registered = true;
+      } catch (_) {}
+    }
+
+    if (!registered) {
+      try {
+        // 方案5: URL 包含 onboarding 或 account 之外的其他路径
+        const currentUrl = page.url();
+        if (currentUrl.includes('onboarding') || (currentUrl.includes('account') && !currentUrl.includes('register'))) {
+          registered = true;
+        }
+      } catch (_) {}
+    }
+
+    // 如果检测到 cookie 弹窗自动点击
+    if (registered) {
+      try {
+        // 点击 Accept/Accept All
+        await page.waitForSelector('button::-p-text(Accept), button::-p-text(Accept All)', { timeout: 3000 });
+        await clickButtonByText(page, 'Accept').catch(() => clickButtonByText(page, 'Accept All'));
+      } catch (_) {}
+      
       console.log('🎉 注册成功！');
-    } catch (_) {
+    } else {
       console.log('⚠️ 未检测到跳转，请人工确认结果');
     }
 
