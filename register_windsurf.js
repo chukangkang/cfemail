@@ -94,7 +94,7 @@ const CONFIG = {
     secure: true,
     auth: {
       user: 'chukk@chukk.cn',
-      pass: 'xxxxx',
+      pass: 'xxxxxxxx',
     },
     logger: false,
   },
@@ -171,20 +171,17 @@ function createEmailRoutingRule(customAddress) {
 }
 // ==================================================
 
-// 脚本启动时间：只认这之后收到的邮件
-const START_TS = new Date(Date.now() - 60 * 1000); // 往前留 1 分钟冗余
-
 /**
  * 从 IMAP 最新邮件中提取 6 位验证码。
- * 只匹配 START_TS 之后收到、且发件人在白名单内的邮件。
+ * 只匹配指定时间之后收到、且发件人在白名单内的邮件。
  */
-async function fetchVerificationCode() {
+async function fetchVerificationCode(startTime) {
   const client = new ImapFlow(CONFIG.imap);
   await client.connect();
   const lock = await client.getMailboxLock('INBOX');
   try {
     // 服务端按日期粗筛，本地再精细过滤
-    const uids = await client.search({ since: START_TS }, { uid: true });
+    const uids = await client.search({ since: startTime }, { uid: true });
     if (!uids || uids.length === 0) return null;
 
     // 取最近的若干封，倒序检查
@@ -197,7 +194,7 @@ async function fetchVerificationCode() {
         { uid: true }
       );
       if (!msg) continue;
-      if (msg.internalDate && new Date(msg.internalDate) < START_TS) continue;
+      if (msg.internalDate && new Date(msg.internalDate) < startTime) continue;
 
       // 发件人白名单过滤
       const fromAddr =
@@ -401,10 +398,12 @@ async function register() {
     });
 
     console.log('🔍 从邮箱收取验证码...');
+    // 获取开始等待验证码的时间（往前留1分钟冗余）
+    const startTime = new Date(Date.now() - 60 * 1000);
     let code = null;
     for (let i = 0; i < 24; i++) {
       try {
-        code = await fetchVerificationCode();
+        code = await fetchVerificationCode(startTime);
       } catch (e) {
         console.warn(`IMAP 读取失败(${i + 1}): ${e.message}`);
       }
