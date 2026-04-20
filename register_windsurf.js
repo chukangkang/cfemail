@@ -23,6 +23,8 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const delay = require('delay');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ====================== 随机生成器 ======================
 function randStr(len, chars) {
@@ -95,6 +97,18 @@ const CONFIG = {
     'noreply@windsurf.com',
   ],
 };
+// ==================================================
+
+// ====================== 保存账号到文件 ======================
+function saveAccountToFile(email, password) {
+  const today = new Date();
+  const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+  const filename = path.join(__dirname, `accounts_${dateStr}.txt`);
+  const line = `${email}|${password}\n`;
+  
+  fs.appendFileSync(filename, line);
+  console.log(`📁 已保存账号到文件: ${filename}`);
+}
 // ==================================================
 
 // 脚本启动时间：只认这之后收到的邮件
@@ -355,6 +369,9 @@ async function register() {
     console.log('账号信息：');
     console.log('  邮箱:', CONFIG.email);
     console.log('  密码:', CONFIG.password);
+    
+    // 保存账号到文件
+    saveAccountToFile(CONFIG.email, CONFIG.password);
   } catch (err) {
     console.error('❌ 出错:', err.message);
     try {
