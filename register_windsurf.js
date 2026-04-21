@@ -64,17 +64,14 @@ function genLastName() {
 // password: 使用固定密码
 const FIXED_PASSWORD = 'new-api.ai2026';
 
-const _firstName = genFirstName();
-const _lastName = genLastName();
-const _password = FIXED_PASSWORD;
-
 // ====================== 配置 ======================
 const CONFIG = {
-  firstName: _firstName,
-  lastName: _lastName,
-  email: `${_firstName}@proxyai.vip`,
-  password: _password,
-  confirmPassword: _password,
+  // 以下字段在每次注册时由 refreshCredentials() 重新生成
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: FIXED_PASSWORD,
+  confirmPassword: FIXED_PASSWORD,
 
   // 收验证码的 IMAP。注意：如果  是通过 Cloudflare Email Routing
   // 转发到 Gmail 等第三方邮箱，这里要填那个第三方邮箱的 IMAP，而不是 chukk.ai。
@@ -99,6 +96,14 @@ const CONFIG = {
   ],
 };
 // ==================================================
+
+function refreshCredentials() {
+  const fn = genFirstName();
+  const ln = genLastName();
+  CONFIG.firstName = fn;
+  CONFIG.lastName = ln;
+  CONFIG.email = `${fn}@proxyai.vip`;
+}
 
 // ====================== 保存账号到文件 ======================
 function saveAccountToFile(email, password) {
@@ -239,127 +244,34 @@ async function fillOtp(page, code) {
   }
 }
 
-async function register() {
+async function registerOne(browser) {
+  refreshCredentials();
   console.log('🎲 随机生成的账号信息：');
   console.log('  firstName:', CONFIG.firstName);
   console.log('  lastName :', CONFIG.lastName);
   console.log('  email    :', CONFIG.email);
   console.log('  password :', CONFIG.password);
 
-  console.log('🚀 启动防风控浏览器...');
-  const browserPath = detectBrowserPath();
-  if (browserPath) {
-    console.log(`🧭 使用浏览器: ${browserPath}`);
-  }
-  // 直接无痕模式启动,不自建 user-data-dir;关闭即丢弃会话
-  const customConfig = {
-    chromeFlags: [
-      '--incognito',
-      '--start-maximized',
-      '--start-fullscreen',
-      '--no-default-browser-check',
-      '--disable-restore-session-state',
-    ],
-  };
-  if (browserPath) customConfig.chromePath = browserPath;
-
-  const connected = await connect({
-    headless: false,
-    turnstile: true,
-    fingerprint: true,
-    customConfig,
-    connectOption: { defaultViewport: null },
-  });
-  const browser = connected.browser;
-  let page = connected.page;
-
-  // 在无痕 BrowserContext 中新开一个 tab,并关闭默认那个非无痕 tab
+  // 为每次注册创建独立的无痕上下文,互不干扰
+  let ctx = null;
+  let page = null;
   try {
     const createIncognito =
       browser.createIncognitoBrowserContext ||
       browser.createBrowserContext;
     if (typeof createIncognito === 'function') {
-      const ctx = await createIncognito.call(browser);
-      const incognitoPage = await ctx.newPage();
-      try {
-        await page.close();
-      } catch (_) {}
-      page = incognitoPage;
-      console.log('🕶️ 已切换到无痕上下文');
+      ctx = await createIncognito.call(browser);
+      page = await ctx.newPage();
+      console.log('🕶️ 已创建新的无痕上下文');
+    } else {
+      page = await browser.newPage();
+      console.log('📄 已创建新标签页');
     }
-  } catch (e) {
-    console.warn('创建无痕上下文失败,继续使用默认页面:', e.message);
-  }
-  page.setDefaultTimeout(90000);
-
-  // 最大化:先读屏幕分辨率,再通过 CDP 把浏览器窗口显式拉到整屏
-  // KVM/无头虚拟机等环境 screen.availWidth/Height 可能为 0,统一降级到 1920x1080
-  const DEFAULT_W = 1920;
-  const DEFAULT_H = 1080;
-  try {
-    const raw = await page.evaluate(() => ({
-      w: window.screen.availWidth,
-      h: window.screen.availHeight,
-    }));
-    const w = raw && raw.w && raw.w > 100 ? raw.w : DEFAULT_W;
-    const h = raw && raw.h && raw.h > 100 ? raw.h : DEFAULT_H;
-    console.log(`🖥️ 使用窗口尺寸: ${w}x${h}${raw && raw.w ? '' : ' (默认)'}`);
-
-    const session = await page.target().createCDPSession();
-    // 有些环境(puppeteer-real-browser)page 级 session 无法隐式解析 target,
-    // 显式传 targetId 更稳;再不行就从 browser 连接取 session
-    const target = page.target();
-    const targetId =
-      (target._targetId) ||
-      (target._targetInfo && target._targetInfo.targetId);
-    let windowId;
+    page.setDefaultTimeout(90000);
     try {
-      const r = await session.send('Browser.getWindowForTarget', { targetId });
-      windowId = r.windowId;
-    } catch (_) {
-      const r = await session.send('Browser.getWindowForTarget');
-      windowId = r.windowId;
-    }
-    // 有些 CDP 实现必须先切回 normal 才能再 maximized;也直接给出具体尺寸兜底
-    await session
-      .send('Browser.setWindowBounds', {
-        windowId,
-        bounds: { windowState: 'normal' },
-      })
-      .catch(() => {});
-    await session
-      .send('Browser.setWindowBounds', {
-        windowId,
-        bounds: { left: 0, top: 0, width: w, height: h, windowState: 'normal' },
-      })
-      .catch(() => {});
-    await session
-      .send('Browser.setWindowBounds', {
-        windowId,
-        bounds: { windowState: 'maximized' },
-      })
-      .catch(() => {});
-    // 让 puppeteer 视口跟随窗口尺寸
-    await page.setViewport({ width: w, height: h });
-  } catch (e) {
-    console.warn('窗口最大化失败,使用默认视口:', e.message);
-    try {
-      await page.setViewport({ width: DEFAULT_W, height: DEFAULT_H });
+      await page.setViewport({ width: 1920, height: 1080 });
     } catch (_) {}
-  }
 
-  // 清空所有 cookies / Storage,确保是未登录状态
-  try {
-    const sess = await page.target().createCDPSession();
-    await sess.send('Network.clearBrowserCookies').catch(() => {});
-    await sess.send('Network.clearBrowserCache').catch(() => {});
-    await sess.send('Storage.clearDataForOrigin', {
-      origin: 'https://windsurf.com',
-      storageTypes: 'all',
-    }).catch(() => {});
-  } catch (_) {}
-
-  try {
     // 1. 打开注册页
     await page.goto('https://windsurf.com/account/register', {
       waitUntil: 'domcontentloaded',
@@ -588,12 +500,15 @@ async function register() {
   } catch (err) {
     console.error('❌ 出错:', err.message);
     try {
-      await page.screenshot({ path: 'error.png', fullPage: true });
+      if (page) await page.screenshot({ path: 'error.png', fullPage: true });
       console.error('已保存截图 error.png');
     } catch (_) {}
+    throw err;
   } finally {
+    // 关闭本次注册的上下文/页面,不关闭浏览器
     try {
-      await browser.close();
+      if (ctx) await ctx.close();
+      else if (page) await page.close();
     } catch (_) {}
   }
 }
@@ -621,4 +536,69 @@ process.on('unhandledRejection', (err) => {
   console.error(err);
 });
 
-register();
+async function main() {
+  const count = parseInt(process.argv[2], 10) || 1;
+
+  console.log('🚀 启动防风控浏览器...');
+  const browserPath = detectBrowserPath();
+  if (browserPath) {
+    console.log(`🧭 使用浏览器: ${browserPath}`);
+  }
+  const customConfig = {
+    chromeFlags: [
+      '--incognito',
+      '--start-maximized',
+      '--start-fullscreen',
+      '--no-default-browser-check',
+      '--disable-restore-session-state',
+    ],
+  };
+  if (browserPath) customConfig.chromePath = browserPath;
+
+  const connected = await connect({
+    headless: false,
+    turnstile: true,
+    fingerprint: true,
+    customConfig,
+    connectOption: { defaultViewport: null },
+  });
+  const browser = connected.browser;
+
+  // 关闭 connect 默认打开的空白页
+  try {
+    if (connected.page) await connected.page.close();
+  } catch (_) {}
+
+  let success = 0;
+  let fail = 0;
+
+  console.log('================================================');
+  console.log(`  Windsurf Auto Register — Count: ${count}`);
+  console.log('================================================');
+
+  for (let i = 1; i <= count; i++) {
+    console.log(`\n========== [${i}/${count}] ==========`);
+    try {
+      await registerOne(browser);
+      success++;
+      console.log(`✅ [${i}/${count}] OK (success: ${success})`);
+    } catch (e) {
+      fail++;
+      console.log(`❌ [${i}/${count}] FAIL (fail: ${fail}): ${e.message}`);
+    }
+    if (i < count) {
+      console.log('⏳ 等待 3 秒...');
+      await delay(3000);
+    }
+  }
+
+  console.log('\n================================================');
+  console.log(`  Done — Success: ${success}, Fail: ${fail}`);
+  console.log('================================================');
+
+  try {
+    await browser.close();
+  } catch (_) {}
+}
+
+main();
