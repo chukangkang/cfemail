@@ -85,7 +85,7 @@ const CONFIG = {
     secure: true,
     auth: {
       user: 'chukk@chukk.cn',
-      pass: 'xxxxxx,
+      pass: 'xxxxxx',
     },
     logger: false,
   },
@@ -114,9 +114,10 @@ function saveAccountToFile(email, password) {
 
 /**
  * 从 IMAP 最新邮件中提取 6 位验证码。
- * 只匹配指定时间之后收到、且发件人在白名单内的邮件。
+ * 只匹配指定时间之后收到、收件人匹配 targetEmail、且发件人在白名单内的邮件。
+ * 优先返回最新一封匹配邮件的验证码，避免重复使用过期验证码。
  */
-async function fetchVerificationCode(startTime) {
+async function fetchVerificationCode(startTime, targetEmail) {
   const client = new ImapFlow(CONFIG.imap);
   await client.connect();
   const lock = await client.getMailboxLock('INBOX');
@@ -125,8 +126,9 @@ async function fetchVerificationCode(startTime) {
     const uids = await client.search({ since: startTime }, { uid: true });
     if (!uids || uids.length === 0) return null;
 
-    // 取最近的若干封，倒序检查
-    const recent = uids.slice(-10).reverse();
+    // 取最近的若干封，倒序检查（最新的优先）
+    const recent = uids.slice(-20).reverse();
+    const targetLower = targetEmail.toLowerCase();
 
     for (const uid of recent) {
       const msg = await client.fetchOne(
@@ -145,13 +147,23 @@ async function fetchVerificationCode(startTime) {
         (msg.envelope.from[0].address || '').toLowerCase();
       if (fromAddr && !CONFIG.mailFromAllow.includes(fromAddr)) continue;
 
+      // 收件人过滤：To 列表中必须包含当前注册邮箱
+      const toAddrs =
+        msg.envelope && msg.envelope.to
+          ? msg.envelope.to.map((t) => (t.address || '').toLowerCase())
+          : [];
+      if (!toAddrs.includes(targetLower)) continue;
+
       const parsed = await simpleParser(msg.source);
       const haystack = [parsed.subject, parsed.text, parsed.html]
         .filter(Boolean)
         .join('\n');
 
       const match = haystack.match(/\b(\d{6})\b/);
-      if (match) return match[1];
+      if (match) {
+        console.log(`📬 匹配到邮件: To=${targetEmail}, Date=${msg.internalDate}, Code=${match[1]}`);
+        return match[1];
+      }
     }
     return null;
   } finally {
@@ -425,6 +437,8 @@ async function register() {
     await delay(500);
 
     console.log('📤 提交密码');
+    // 记录提交密码的时间（往前留10秒冗余），用于过滤验证码邮件
+    const codeStartTime = new Date(Date.now() - 10 * 1000);
     await clickButtonByText(page, 'Continue');
 
     // 4. 第三步：等验证码输入框 + 取验证码
@@ -433,13 +447,11 @@ async function register() {
       timeout: 30000,
     });
 
-    console.log('🔍 从邮箱收取验证码...');
-    // 获取开始等待验证码的时间（往前留1分钟冗余）
-    const startTime = new Date(Date.now() - 60 * 1000);
+    console.log(`🔍 从邮箱收取验证码... (目标: ${CONFIG.email}, 起始时间: ${codeStartTime.toISOString()})`);
     let code = null;
     for (let i = 0; i < 24; i++) {
       try {
-        code = await fetchVerificationCode(startTime);
+        code = await fetchVerificationCode(codeStartTime, CONFIG.email);
       } catch (e) {
         console.warn(`IMAP 读取失败(${i + 1}): ${e.message}`);
       }
