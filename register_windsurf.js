@@ -244,7 +244,7 @@ async function fillOtp(page, code) {
   }
 }
 
-async function registerOne(browser) {
+async function registerOne(page) {
   refreshCredentials();
   console.log('🎲 随机生成的账号信息：');
   console.log('  firstName:', CONFIG.firstName);
@@ -252,24 +252,17 @@ async function registerOne(browser) {
   console.log('  email    :', CONFIG.email);
   console.log('  password :', CONFIG.password);
 
-  // 为每次注册创建独立的无痕上下文,互不干扰
-  let ctx = null;
-  let page = null;
   try {
-    const createIncognito =
-      browser.createIncognitoBrowserContext ||
-      browser.createBrowserContext;
-    if (typeof createIncognito === 'function') {
-      ctx = await createIncognito.call(browser);
-      page = await ctx.newPage();
-      console.log('🕶️ 已创建新的无痕上下文');
-    } else {
-      page = await browser.newPage();
-      console.log('📄 已创建新标签页');
-    }
-    page.setDefaultTimeout(90000);
+    // 清空 cookies / Storage,确保是未登录状态
     try {
-      await page.setViewport({ width: 1920, height: 1080 });
+      const sess = await page.target().createCDPSession();
+      await sess.send('Network.clearBrowserCookies').catch(() => {});
+      await sess.send('Network.clearBrowserCache').catch(() => {});
+      await sess.send('Storage.clearDataForOrigin', {
+        origin: 'https://windsurf.com',
+        storageTypes: 'all',
+      }).catch(() => {});
+      await sess.detach().catch(() => {});
     } catch (_) {}
 
     // 1. 打开注册页
@@ -500,16 +493,10 @@ async function registerOne(browser) {
   } catch (err) {
     console.error('❌ 出错:', err.message);
     try {
-      if (page) await page.screenshot({ path: 'error.png', fullPage: true });
+      await page.screenshot({ path: 'error.png', fullPage: true });
       console.error('已保存截图 error.png');
     } catch (_) {}
     throw err;
-  } finally {
-    // 关闭本次注册的上下文/页面,不关闭浏览器
-    try {
-      if (ctx) await ctx.close();
-      else if (page) await page.close();
-    } catch (_) {}
   }
 }
 
@@ -548,7 +535,6 @@ async function main() {
     chromeFlags: [
       '--incognito',
       '--start-maximized',
-      '--start-fullscreen',
       '--no-default-browser-check',
       '--disable-restore-session-state',
     ],
@@ -563,11 +549,8 @@ async function main() {
     connectOption: { defaultViewport: null },
   });
   const browser = connected.browser;
-
-  // 关闭 connect 默认打开的空白页
-  try {
-    if (connected.page) await connected.page.close();
-  } catch (_) {}
+  const page = connected.page;
+  page.setDefaultTimeout(90000);
 
   let success = 0;
   let fail = 0;
@@ -579,7 +562,7 @@ async function main() {
   for (let i = 1; i <= count; i++) {
     console.log(`\n========== [${i}/${count}] ==========`);
     try {
-      await registerOne(browser);
+      await registerOne(page);
       success++;
       console.log(`✅ [${i}/${count}] OK (success: ${success})`);
     } catch (e) {
