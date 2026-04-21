@@ -3,6 +3,7 @@
  *
  * 依赖windows/powershel：
  *   winget install OpenJS.NodeJS.LTS
+ *   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
  *   npm install
  *   node register_windsurf.js 
  *
@@ -25,16 +26,21 @@ const delay = require('delay');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 
-// ====================== 邮箱转发 API 配置 ======================
-const EMAIL_API = {
-  baseUrl: 'https://new-api.ai/email',
-  apiKey: 'proxyai.vip',
-  domain: 'proxyai.vip',
-  destination: 'chukk@chukk.cn',
-};
-// ==================================================
+// 在没有 Chrome 时,自动使用系统里已有的 Edge(Windows 默认自带)
+function detectBrowserPath() {
+  if (process.platform !== 'win32') return undefined;
+  const candidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
 
 // ====================== 随机生成器 ======================
 function randStr(len, chars) {
@@ -55,27 +61,12 @@ function genFirstName() {
 function genLastName() {
   return randStr(6, LOWER);
 }
-// password: 9 位，必须含大小写+数字
-function genPassword() {
-  // 先保证每类至少 1 个
-  const must = [
-    randStr(1, UPPER),
-    randStr(1, LOWER),
-    randStr(1, DIGIT),
-  ];
-  const rest = randStr(6, UPPER + LOWER + DIGIT).split('');
-  const all = [...must, ...rest];
-  // Fisher-Yates 洗牌
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(0, i + 1);
-    [all[i], all[j]] = [all[j], all[i]];
-  }
-  return all.join('');
-}
+// password: 使用固定密码
+const FIXED_PASSWORD = 'new-api.ai2026';
 
 const _firstName = genFirstName();
 const _lastName = genLastName();
-const _password = genPassword();
+const _password = FIXED_PASSWORD;
 
 // ====================== 配置 ======================
 const CONFIG = {
@@ -118,56 +109,6 @@ function saveAccountToFile(email, password) {
   
   fs.appendFileSync(filename, line);
   console.log(`📁 已保存账号到文件: ${filename}`);
-}
-// ==================================================
-
-// ====================== 创建邮箱转发规则 ======================
-function createEmailRoutingRule(customAddress) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      domain: EMAIL_API.domain,
-      custom_address: customAddress,
-      destination: EMAIL_API.destination,
-      name: 'windurf',
-      enabled: true,
-      priority: 0,
-    });
-
-    const options = {
-      hostname: new URL(EMAIL_API.baseUrl).hostname,
-      port: 443,
-      path: '/email/api/routing/rules',
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'x-api-key': EMAIL_API.apiKey,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          const result = JSON.parse(data);
-          if (result.success) {
-            console.log(`📧 已创建邮箱转发: ${customAddress} -> ${EMAIL_API.destination}`);
-            resolve(result);
-          } else {
-            reject(new Error(`创建邮箱失败: ${JSON.stringify(result)}`));
-          }
-        } catch (e) {
-          reject(new Error(`解析响应失败: ${e.message}`));
-        }
-      });
-    });
-
-    req.on('error', (e) => reject(e));
-    req.write(postData);
-    req.end();
-  });
 }
 // ==================================================
 
@@ -293,23 +234,118 @@ async function register() {
   console.log('  email    :', CONFIG.email);
   console.log('  password :', CONFIG.password);
 
-  // 先创建邮箱转发规则
-  console.log('📧 创建邮箱转发规则...');
-  try {
-    await createEmailRoutingRule(CONFIG.email);
-    console.log('✅ 邮箱转发创建成功');
-  } catch (e) {
-    console.error('❌ 创建邮箱转发失败:', e.message);
-    throw e;
-  }
-
   console.log('🚀 启动防风控浏览器...');
-  const { page, browser } = await connect({
+  const browserPath = detectBrowserPath();
+  if (browserPath) {
+    console.log(`🧭 使用浏览器: ${browserPath}`);
+  }
+  // 直接无痕模式启动,不自建 user-data-dir;关闭即丢弃会话
+  const customConfig = {
+    chromeFlags: [
+      '--incognito',
+      '--start-maximized',
+      '--start-fullscreen',
+      '--no-default-browser-check',
+      '--disable-restore-session-state',
+    ],
+  };
+  if (browserPath) customConfig.chromePath = browserPath;
+
+  const connected = await connect({
     headless: false,
     turnstile: true,
     fingerprint: true,
+    customConfig,
+    connectOption: { defaultViewport: null },
   });
+  const browser = connected.browser;
+  let page = connected.page;
+
+  // 在无痕 BrowserContext 中新开一个 tab,并关闭默认那个非无痕 tab
+  try {
+    const createIncognito =
+      browser.createIncognitoBrowserContext ||
+      browser.createBrowserContext;
+    if (typeof createIncognito === 'function') {
+      const ctx = await createIncognito.call(browser);
+      const incognitoPage = await ctx.newPage();
+      try {
+        await page.close();
+      } catch (_) {}
+      page = incognitoPage;
+      console.log('🕶️ 已切换到无痕上下文');
+    }
+  } catch (e) {
+    console.warn('创建无痕上下文失败,继续使用默认页面:', e.message);
+  }
   page.setDefaultTimeout(90000);
+
+  // 最大化:先读屏幕分辨率,再通过 CDP 把浏览器窗口显式拉到整屏
+  // KVM/无头虚拟机等环境 screen.availWidth/Height 可能为 0,统一降级到 1920x1080
+  const DEFAULT_W = 1920;
+  const DEFAULT_H = 1080;
+  try {
+    const raw = await page.evaluate(() => ({
+      w: window.screen.availWidth,
+      h: window.screen.availHeight,
+    }));
+    const w = raw && raw.w && raw.w > 100 ? raw.w : DEFAULT_W;
+    const h = raw && raw.h && raw.h > 100 ? raw.h : DEFAULT_H;
+    console.log(`🖥️ 使用窗口尺寸: ${w}x${h}${raw && raw.w ? '' : ' (默认)'}`);
+
+    const session = await page.target().createCDPSession();
+    // 有些环境(puppeteer-real-browser)page 级 session 无法隐式解析 target,
+    // 显式传 targetId 更稳;再不行就从 browser 连接取 session
+    const target = page.target();
+    const targetId =
+      (target._targetId) ||
+      (target._targetInfo && target._targetInfo.targetId);
+    let windowId;
+    try {
+      const r = await session.send('Browser.getWindowForTarget', { targetId });
+      windowId = r.windowId;
+    } catch (_) {
+      const r = await session.send('Browser.getWindowForTarget');
+      windowId = r.windowId;
+    }
+    // 有些 CDP 实现必须先切回 normal 才能再 maximized;也直接给出具体尺寸兜底
+    await session
+      .send('Browser.setWindowBounds', {
+        windowId,
+        bounds: { windowState: 'normal' },
+      })
+      .catch(() => {});
+    await session
+      .send('Browser.setWindowBounds', {
+        windowId,
+        bounds: { left: 0, top: 0, width: w, height: h, windowState: 'normal' },
+      })
+      .catch(() => {});
+    await session
+      .send('Browser.setWindowBounds', {
+        windowId,
+        bounds: { windowState: 'maximized' },
+      })
+      .catch(() => {});
+    // 让 puppeteer 视口跟随窗口尺寸
+    await page.setViewport({ width: w, height: h });
+  } catch (e) {
+    console.warn('窗口最大化失败,使用默认视口:', e.message);
+    try {
+      await page.setViewport({ width: DEFAULT_W, height: DEFAULT_H });
+    } catch (_) {}
+  }
+
+  // 清空所有 cookies / Storage,确保是未登录状态
+  try {
+    const sess = await page.target().createCDPSession();
+    await sess.send('Network.clearBrowserCookies').catch(() => {});
+    await sess.send('Network.clearBrowserCache').catch(() => {});
+    await sess.send('Storage.clearDataForOrigin', {
+      origin: 'https://windsurf.com',
+      storageTypes: 'all',
+    }).catch(() => {});
+  } catch (_) {}
 
   try {
     // 1. 打开注册页
@@ -430,13 +466,46 @@ async function register() {
     }
     console.log('✅ 收到验证码:', code);
 
-    // 5. 填写验证码
+    // 5. 填写验证码(填完 6 位后,Windsurf 通常会自动提交并跳转)
     await fillOtp(page, code);
-    await delay(800);
 
-    // 6. 点击 Create account
-    console.log('✅ 提交验证');
-    await clickButtonByText(page, 'Create account');
+    // 辅助:判断页面是否已离开注册页
+    const isLeftRegister = () => !/\/account\/register/.test(page.url());
+
+    // 6. 等待自动提交 + 跳转;不行再点按钮兜底
+    let autoSubmitted = false;
+    try {
+      await page.waitForFunction(
+        () => !/\/account\/register/.test(location.pathname),
+        { timeout: 10000 }
+      );
+      autoSubmitted = true;
+      console.log('✅ OTP 已自动提交,页面已跳转');
+    } catch (_) {}
+
+    if (!autoSubmitted) {
+      // 先等 3 秒,给网络请求留出跳转时间
+      await delay(3000);
+      if (isLeftRegister()) {
+        autoSubmitted = true;
+        console.log('✅ 页面已跳转(延迟检测)');
+      }
+    }
+
+    if (!autoSubmitted) {
+      console.log('✅ 手动提交验证');
+      try {
+        await clickButtonByText(page, 'Create account');
+      } catch (e) {
+        // 点击失败再给 3 秒看是否其实已跳转
+        await delay(3000);
+        if (isLeftRegister()) {
+          console.log('(按钮消失但页面已跳转,视为已自动提交)');
+        } else {
+          throw e;
+        }
+      }
+    }
 
     // 等待跳转或成功提示
     let registered = false;
@@ -516,5 +585,28 @@ async function register() {
     } catch (_) {}
   }
 }
+
+// 浏览器关闭时 chrome-launcher 在 Windows 上偶尔无法删除 %TEMP%\lighthouse.* 目录,
+// 这对注册结果没有影响,忽略这类 EPERM,避免进程以非 0 退出。
+function isHarmlessCleanupErr(err) {
+  return (
+    err &&
+    err.code === 'EPERM' &&
+    typeof err.path === 'string' &&
+    /lighthouse\.|windsurf-/.test(err.path)
+  );
+}
+process.on('uncaughtException', (err) => {
+  if (isHarmlessCleanupErr(err)) {
+    console.warn('⚠️ 忽略浏览器临时目录清理错误:', err.path);
+    return;
+  }
+  console.error(err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  if (isHarmlessCleanupErr(err)) return;
+  console.error(err);
+});
 
 register();
