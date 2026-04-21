@@ -131,4 +131,38 @@ class CloudflareEmailRouting:
             "DELETE", f"/zones/{zone_id}/email/routing/rules/{rule_id}"
         )["result"]
 
+    def delete_all_custom_rules(self, zone_id: str) -> dict[str, Any]:
+        """
+        删除该域名下所有"自定义地址(literal)"规则。
+        会跳过 catch-all 规则,避免误伤兜底转发。
+        返回删除结果汇总。
+        """
+        deleted: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+        for rule in self.list_rules(zone_id):
+            matchers = rule.get("matchers") or []
+            # 只处理自定义地址(literal 匹配 to),保留 catch-all
+            is_custom = any(
+                m.get("type") == "literal" and m.get("field") == "to"
+                for m in matchers
+            )
+            if not is_custom:
+                skipped.append({"id": rule.get("tag") or rule.get("id"), "name": rule.get("name")})
+                continue
+            rule_id = rule.get("tag") or rule.get("id")
+            try:
+                self.delete_rule(zone_id, rule_id)
+                deleted.append({"id": rule_id, "name": rule.get("name")})
+            except Exception as e:
+                failed.append({"id": rule_id, "name": rule.get("name"), "error": str(e)})
+        return {
+            "deleted_count": len(deleted),
+            "skipped_count": len(skipped),
+            "failed_count": len(failed),
+            "deleted": deleted,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
 

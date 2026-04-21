@@ -123,6 +123,21 @@ def list_rules(domain: str) -> dict[str, Any]:
 
 
 @app.delete(
+    "/api/routing/rules",
+    dependencies=[Depends(verify_del_key)],
+    summary="删除域名下全部自定义地址规则(保留 catch-all,需 X-Del-Key)",
+)
+def delete_all_rules(domain: str) -> dict[str, Any]:
+    cf = get_cf()
+    try:
+        zone_id = cf.get_zone_id(domain)
+        summary = cf.delete_all_custom_rules(zone_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "zone_id": zone_id, **summary}
+
+
+@app.delete(
     "/api/routing/rules/{rule_id}",
     dependencies=[Depends(verify_del_key)],
     summary="删除指定规则(需在请求头携带 X-Del-Key)",

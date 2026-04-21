@@ -94,7 +94,7 @@ const CONFIG = {
     secure: true,
     auth: {
       user: 'chukk@chukk.cn',
-      pass: 'xxxxxxxx',
+      pass: 'xxxxxx,
     },
     logger: false,
   },
